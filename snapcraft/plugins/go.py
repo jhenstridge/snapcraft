@@ -60,6 +60,13 @@ from snapcraft.internal import elf, errors
 logger = logging.getLogger(__name__)
 
 
+class GoPluginInvalidGoModError(errors.SnapcraftError):
+    fmt = (
+        "Invalid 'go.mod` file in the source tree.\n"
+        "Verify that the 'go.mod' file contains a 'module' directive.\n"
+    )
+
+
 class GoPlugin(snapcraft.BasePlugin):
     @classmethod
     def schema(cls):
@@ -105,6 +112,7 @@ class GoPlugin(snapcraft.BasePlugin):
         self._setup_base_tools(options.go_channel, project.info.get_build_base())
         self._is_classic = project.info.confinement == "classic"
 
+        self._gomod = os.path.join(self.sourcedir, "go.mod")
         self._gopath = os.path.join(self.partdir, "go")
         self._gopath_src = os.path.join(self._gopath, "src")
         self._gopath_bin = os.path.join(self._gopath, "bin")
@@ -126,17 +134,20 @@ class GoPlugin(snapcraft.BasePlugin):
         super().pull()
         os.makedirs(self._gopath_src, exist_ok=True)
 
-        if any(iglob("{}/**/*.go".format(self.sourcedir), recursive=True)):
-            go_package = self._get_local_go_package()
-            go_package_path = os.path.join(self._gopath_src, go_package)
-            if os.path.islink(go_package_path):
-                os.unlink(go_package_path)
-            os.makedirs(os.path.dirname(go_package_path), exist_ok=True)
-            os.symlink(self.sourcedir, go_package_path)
-            self._run(["go", "get", "-t", "-d", "./{}/...".format(go_package)])
+        go_package = self._get_local_go_package()
+        if self._uses_go_modules():
+            self._run(["go", "mod", "download"])
+        else:
+            if any(iglob("{}/**/*.go".format(self.sourcedir), recursive=True)):
+                go_package_path = os.path.join(self._gopath_src, go_package)
+                if os.path.islink(go_package_path):
+                    os.unlink(go_package_path)
+                os.makedirs(os.path.dirname(go_package_path), exist_ok=True)
+                os.symlink(self.sourcedir, go_package_path)
+                self._run(["go", "get", "-t", "-d", "./{}/...".format(go_package)])
 
-        for go_package in self.options.go_packages:
-            self._run(["go", "get", "-t", "-d", go_package])
+            for go_package in self.options.go_packages:
+                self._run(["go", "get", "-t", "-d", go_package])
 
     def clean_pull(self):
         super().clean_pull()
@@ -145,7 +156,26 @@ class GoPlugin(snapcraft.BasePlugin):
         if os.path.exists(self._gopath):
             shutil.rmtree(self._gopath)
 
+    def _uses_go_modules(self):
+        """Returns True if this project uses the new module build system"""
+        return os.path.isfile(self._gomod)
+
     def _get_local_go_package(self):
+        if self._uses_go_modules():
+            with open(self._gomod, "r") as fp:
+                for line in fp:
+                    line_split = line.split()
+                    if line_split[0] == "module":
+                        module = line_split[1]
+                        break
+                else:
+                    raise GoPluginInvalidGoModError()
+            if self.options.go_importpath:
+                logger.warning("Ignoring `go-importpath' for the {!r} part, "
+                               "in favour of go.mod definition".format(self.name))
+            return module
+
+        # This project does not use Go modules
         if self.options.go_importpath:
             go_package = self.options.go_importpath
         else:
@@ -157,7 +187,10 @@ class GoPlugin(snapcraft.BasePlugin):
         return go_package
 
     def _get_local_main_packages(self):
-        search_path = "./{}/...".format(self._get_local_go_package())
+        if self._uses_go_modules():
+            search_path = "./..."
+        else:
+            search_path = "./{}/...".format(self._get_local_go_package())
         packages = self._run_output(
             ["go", "list", "-f", "{{.ImportPath}} {{.Name}}", search_path]
         )
@@ -209,11 +242,19 @@ class GoPlugin(snapcraft.BasePlugin):
 
     def _run(self, cmd, **kwargs):
         env = self._build_environment()
-        return self.run(cmd, cwd=self._gopath_src, env=env, **kwargs)
+        if self._uses_go_modules():
+            cwd = self.builddir
+        else:
+            cwd = self._gopath_src
+        return self.run(cmd, cwd=cwd, env=env, **kwargs)
 
     def _run_output(self, cmd, **kwargs):
         env = self._build_environment()
-        return self.run_output(cmd, cwd=self._gopath_src, env=env, **kwargs)
+        if self._uses_go_modules():
+            cwd = self.builddir
+        else:
+            cwd = self._gopath_src
+        return self.run_output(cmd, cwd=cwd, env=env, **kwargs)
 
     def _build_environment(self):
         env = os.environ.copy()

@@ -593,6 +593,9 @@
                         ],
                         "timer": [
                             "daemon"
+                        ],
+                        "daemon-scope": [
+                            "daemon"
                         ]
                     },
                     "additionalProperties": false,
@@ -674,6 +677,14 @@
                                 "oneshot",
                                 "notify",
                                 "dbus"
+                            ]
+                        },
+                        "daemon-scope": {
+                            "type": "string",
+                            "description": "the scope of the daemon (system or user).",
+                            "enum": [
+                                "system",
+                                "user"
                             ]
                         },
                         "after": {

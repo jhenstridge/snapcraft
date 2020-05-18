@@ -156,6 +156,16 @@ class ValidationTest(ValidationBaseTest):
                 "restart-condition": "on-watchdog",
                 "watchdog-timeout": "30s",
             },
+            "service15": {
+                "command": "binary15",
+                "daemon": "simple",
+                "daemon-scope": "system",
+            },
+            "service16": {
+                "command": "binary16",
+                "daemon": "simple",
+                "daemon-scope": "user",
+            },
         }
 
         Validator(self.data).validate()
@@ -184,6 +194,26 @@ class ValidationTest(ValidationBaseTest):
             ),
         )
 
+    def test_invalid_daemon_scope(self):
+        self.data["apps"] = {
+            "service1": {
+                "command": "binary1",
+                "daemon": "simple",
+                "daemon-scope": "europe",
+            }
+        }
+        raised = self.assertRaises(
+            snapcraft.yaml_utils.errors.YamlValidationError,
+            Validator(self.data).validate,
+        )
+        self.assertThat(
+            str(raised),
+            Contains(
+                "The 'apps/service1/daemon-scope' property does not match the "
+                "required schema: 'europe' is not one of ['system', 'user']"
+            ),
+        )
+
     def test_missing_required_property_and_missing_adopt_info(self):
         del self.data["summary"]
         del self.data["adopt-info"]
@@ -206,6 +236,7 @@ class ValidationTest(ValidationBaseTest):
         ("post-stop-command", "binary1 --post-stop"),
         ("before", ["service1"]),
         ("after", ["service2"]),
+        ("daemon-scope", "system"),
     ],
 )
 def test_daemon_dependency(data, option, value):

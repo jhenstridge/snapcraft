@@ -156,6 +156,11 @@ class ValidationTest(ValidationBaseTest):
                 "restart-condition": "on-watchdog",
                 "watchdog-timeout": "30s",
             },
+            "service15": {
+                "command": "binary15",
+                "daemon": "simple",
+                "activates-on": ["slot1", "slot2"],
+            },
         }
 
         Validator(self.data).validate()
@@ -184,6 +189,25 @@ class ValidationTest(ValidationBaseTest):
             ),
         )
 
+    def test_invalid_activates_on(self):
+        self.data["apps"] = {
+            "service1": {
+                "command": "binary1",
+                "daemon": "simple",
+                "activates-on": ["slot1", "slot1"],
+            },
+        }
+        raised = self.assertRaises(
+            snapcraft.yaml_utils.errors.YamlValidationError,
+            Validator(self.data).validate,
+        )
+        self.assertThat(
+            str(raised),
+            Contains(
+                "The 'apps/service1/activates-on' property does not match the required schema: ['slot1', 'slot1'] has non-unique elements"
+            ),
+        )
+
     def test_missing_required_property_and_missing_adopt_info(self):
         del self.data["summary"]
         del self.data["adopt-info"]
@@ -206,6 +230,7 @@ class ValidationTest(ValidationBaseTest):
         ("post-stop-command", "binary1 --post-stop"),
         ("before", ["service1"]),
         ("after", ["service2"]),
+        ("activates-on", ["slot1"]),
     ],
 )
 def test_daemon_dependency(data, option, value):
